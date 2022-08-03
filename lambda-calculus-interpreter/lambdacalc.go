@@ -27,7 +27,9 @@ func main() {
 			print(">>")
 			continue
 		}
+
 		final := eval(program, env)
+
 		if final != nil {
 			println("Final value of expression", final.ExprString())
 		} else {
@@ -37,39 +39,50 @@ func main() {
 		print(">>")
 	}
 }
-
+func NewEnclosedEnvironment(outer *Environment) *Environment {
+	env := NewEnvironment()
+	env.outer = outer
+	return env
+}
 func NewEnvironment() *Environment {
 	s := make(map[ast.Identifier]ast.Expression)
-	return &Environment{store: s}
+	return &Environment{store: s, outer: nil}
 }
 
 type Environment struct {
 	store map[ast.Identifier]ast.Expression
+	outer *Environment
 }
 
 func (e *Environment) Get(name ast.Identifier) (ast.Expression, bool) {
 	obj, ok := e.store[name]
-
+	if !ok && e.outer != nil {
+		obj, ok = e.outer.Get(name)
+	}
 	return obj, ok
 }
 func (e *Environment) Set(name ast.Identifier, val ast.Expression) ast.Expression {
 	e.store[name] = val
 	return val
 }
-
-func eval(root ast.AstNode, env *Environment) ast.Expression {
+func eval(root ast.AstNode, env *Environment) ast.Expression { //eval issue where same name bindings get replaced when they shouldn't in an application
 	switch node := root.(type) {
 	case ast.Abstraction:
+		temp, ok := env.Get(node.Arg)
+		env.Set(node.Arg, node.Arg) //free variables with same name of the argument do not get replaced in the expression
 		ret := ast.Abstraction{Arg: node.Arg, Exp: eval(node.Exp, env)}
+		if ok {
+			env.Set(node.Arg, temp)
+		}
 		return ret
 	case ast.Application:
 		left := eval(node.Fun, env)
 		if left, isabs := left.(ast.Abstraction); isabs {
 			//evaluate abstraction with bound argument
 			//because maps are shallow copies always for no good reason besides fuck you
-			newenv := *env
+			newenv := NewEnclosedEnvironment(env)
 			newenv.Set(left.Arg, eval(node.Arg, env))
-			return eval(left.Exp, &newenv)
+			return eval(left.Exp, newenv)
 
 		}
 		return ast.Application{left, eval(node.Arg, env)}
@@ -79,7 +92,6 @@ func eval(root ast.AstNode, env *Environment) ast.Expression {
 		}
 		return node
 	case ast.Binding:
-		println("Binding")
 		val := eval(node.Val, env)
 		env.Set(node.Id, val)
 		return val
